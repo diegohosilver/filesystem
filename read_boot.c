@@ -32,7 +32,7 @@ int main() {
     fread(pt, sizeof(PartitionTable), 4, in); // leo entradas 
     
     for(i=0; i<4; i++) {        
-        printf("Partiion type: %d\n", pt[i].partition_type);
+        printf("Partition type: %d\n", pt[i].partition_type);
         if(pt[i].partition_type == 1) {
             printf("Encontrado FAT12 %d\n", i);
             break;
