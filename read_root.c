@@ -78,9 +78,9 @@ int main() {
     Fat12Entry entry;
    
 	fseek(in, 0x1BE, SEEK_SET);
-   
-    for(i=0; i<4; i++) {   
-        fread(pt, sizeof(PartitionTable), 4, in);             
+    fread(pt, sizeof(PartitionTable), 4, in);
+
+    for(i=0; i<4; i++) {              
         if(pt[i].partition_type == 1) {
             printf("Encontrada particion FAT12 %d\n", i);
             break;
