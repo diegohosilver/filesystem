@@ -54,6 +54,9 @@ typedef struct
 	unsigned char filesize[4];
 } __attribute((packed)) Fat12Entry;
 
+/**
+ * Printear flag del archivo
+ */
 void print_file_type(Fat12Entry *entry)
 {
 	switch (entry->flags)
@@ -72,6 +75,9 @@ void print_file_type(Fat12Entry *entry)
 	}
 }
 
+/**
+ * Printear contenido del archivo 
+ */
 void print_file_content(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs)
 {
 	unsigned int fat_start = sizeof(Fat12BootSector) + (bs->reserved_sectors - 1) * bs->sector_size;
@@ -89,13 +95,16 @@ void print_file_content(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSe
 	printf("%s \n", buffer);
 }
 
+/**
+ * Printear información sobre el archivo
+ */
 void print_file_info(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs)
 {
 
 	switch (entry->filename[0])
 	{
 	case 0x00:
-		return; // unused entry
+		return; // Entrada sin utilizar
 	case 0xE5:
 		printf("\n");
 		printf("Archivo eliminado: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
@@ -126,8 +135,10 @@ int main()
 	Fat12BootSector bs;
 	Fat12Entry entry;
 
-	fseek(in, 0x1BE, SEEK_SET);				  //Ir al inicio de la tabla de particiones
-	fread(pt, sizeof(PartitionTable), 4, in); //Lectura
+	// Ir al inicio de la tabla de particiones
+	fseek(in, 0x1BE, SEEK_SET);
+	// Leo entradas
+	fread(pt, sizeof(PartitionTable), 4, in);
 
 	for (i = 0; i < 4; i++)
 	{
@@ -138,24 +149,27 @@ int main()
 		}
 	}
 
+	// Terminar ejecución si no existe fat12
 	if (i == 4)
 	{
 		printf("No encontrado filesystem FAT12, saliendo...\n");
 		return -1;
 	}
 
+	// Ir al offset cero para leer boot sector
 	fseek(in, 0, SEEK_SET);
 	fread(&bs, sizeof(Fat12BootSector), 1, in);
 
 	printf("En  0x%lx, sector size %d, FAT size %d sectors, %d FATs\n\n", ftell(in), bs.sector_size, bs.fat_size, bs.fat_table_count);
 
+	// Ir al root directory
 	fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
 
 	printf("Root dir_entries %d \n", bs.root_entries);
 
+	// Leer root
 	for (i = 0; i < bs.root_entries; i++)
 	{
-
 		fread(&entry, sizeof(entry), 1, in);
 
 		unsigned int last_read_sector = ftell(in);

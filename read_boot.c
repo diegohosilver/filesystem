@@ -44,8 +44,10 @@ int main()
 	PartitionTable pt[4];
 	Fat12BootSector bs;
 
-	fseek(in, 0x1BE, SEEK_SET);				  // Ir al inicio de la tabla de particiones
-	fread(pt, sizeof(PartitionTable), 4, in); // leo entradas
+	// Ir al inicio de la tabla de particiones
+	fseek(in, 0x1BE, SEEK_SET);
+	// Leo entradas
+	fread(pt, sizeof(PartitionTable), 4, in);
 
 	for (i = 0; i < 4; i++)
 	{
@@ -57,15 +59,18 @@ int main()
 		}
 	}
 
+	// Terminar ejecución si no existe fat12
 	if (i == 4)
 	{
 		printf("No se encontró filesystem FAT12, saliendo ...\n");
 		return -1;
 	}
 
+	// Ir al offset cero para leer boot sector
 	fseek(in, 0, SEEK_SET);
 	fread(&bs, sizeof(Fat12BootSector), 1, in);
 
+	// Mostrar información del boot sector
 	printf("  Jump code: %02X:%02X:%02X\n", bs.jmp[0], bs.jmp[1], bs.jmp[2]);
 	printf("  OEM code: [%.8s]\n", bs.oem);
 	printf("  sector_size: %d\n", bs.sector_size);
