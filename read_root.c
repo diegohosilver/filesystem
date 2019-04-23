@@ -83,26 +83,7 @@ void print_file_content(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSe
 	unsigned int block = data_start + (cluster_size * (entry->fat_idx - 2));
 
 	fseek(in, block, SEEK_SET);
-
-	if (entry->flags == 0x10)
-	{
-		Fat12Entry sub_entry;
-
-		for (int i = 0; i < bs->root_entries; i++)
-		{
-			fread(&sub_entry, sizeof(sub_entry), 1, in);
-
-			unsigned int last_read_sector = ftell(in);
-
-			print_file_info_only(in, &sub_entry, sizeof(sub_entry), bs);
-
-			fseek(in, last_read_sector, SEEK_SET);
-		}
-	}
-	else
-	{
-		fread(buffer, 1, bs->sector_size, in);
-	}
+	fread(buffer, 1, bs->sector_size, in);
 
 	printf("Bloque [0x%X] :", block);
 	printf("%s \n", buffer);
@@ -135,32 +116,6 @@ void print_file_info(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSecto
 
 	print_file_type(entry);
 	print_file_content(in, entry, entry_size, bs);
-}
-
-void print_file_info_only(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs)
-{
-
-	switch (entry->filename[0])
-	{
-	case 0x00:
-		return; // unused entry
-	case 0xE5:
-		printf("\n");
-		printf("Archivo eliminado: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
-		break;
-	case 0x05:
-		printf("\n");
-		printf("Archivo comienza con 0xE5: [%c%.7s.%.3s] ", 0xE5, entry->filename + 1, entry->extension);
-		break;
-	case 0x2E:
-		printf("\n");
-		printf("Directorio: [%.8s.%.3s] ", entry->filename, entry->extension);
-		break;
-	default:
-		printf("\n");
-		printf("File: [%.8s.%.3s] \n", entry->filename, entry->extension);
-		printf("Tamaño de archivo [%i] bytes \n", (int)entry->filesize[0]);
-	}
 }
 
 int main()
