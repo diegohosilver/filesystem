@@ -14,17 +14,17 @@ typedef struct {
     unsigned char jmp[3]; 
     unsigned char oem[8]; 
     unsigned short sector_size; 
-    unsigned char sectores_por_cluster; 
-    unsigned short sectores_reservados; 
-    unsigned char cantidad_tablas_fats; 
+    unsigned char sectors_by_cluster; 
+    unsigned short reserved_sectors; 
+    unsigned char fat_table_count; 
     unsigned short root_entries; 
-    unsigned short cantidad_sectores; 
-    unsigned char media_descriptor[1]; 
-    unsigned short tamanio_fat; 
-    unsigned short sectores_por_track; 
-    unsigned short cantidad_heads; 
-    unsigned int sectores_ocultos:32; 
-    unsigned int sectores_filesystem:32;
+    unsigned short sector_count; 
+    unsigned char media_descriptor; 
+    unsigned short fat_size; 
+    unsigned short sectors_by_track; 
+    unsigned short head_count; 
+    unsigned int hidden_sectors:32; 
+    unsigned int filesystem_sectors:32;
     unsigned char int13; 
     unsigned char nu; 
     unsigned char ebs; 
@@ -39,74 +39,78 @@ typedef struct {
 	unsigned char filename[8];
 	unsigned char extension[3];
 	unsigned char flags;
-	unsigned char reservado;
-	unsigned char createdTime;
-	unsigned char createdHour[2];
-	unsigned char createdDay[2];
-	unsigned char accessedDay[2];
-	unsigned char highBytesOfFirstClusterAddress[2];
-	unsigned char writenTime[2];
-	unsigned char writenDay[2];
+	unsigned char reserved;
+	unsigned char created_time;
+	unsigned char created_hour[2];
+	unsigned char created_day[2];
+	unsigned char accessed_day[2];
+	unsigned char high_bytes_first_cluster_address[2];
+	unsigned char writen_time[2];
+	unsigned char writen_day[2];
 	unsigned short fat_idx;
 	unsigned char filesize[4];
-
 } __attribute((packed)) Fat12Entry;
 
 
-   void tipoDeArchivo(Fat12Entry *entry){
-        if(entry->flags == 0x01){
-                printf("Archivo solo de lectura \n");
-        }else if (entry->flags == 0x02){
-                printf("Archivo oculto \n");
-        }else if(entry->flags == 0x04){
-                printf("Archivo del sistema \n");  
-        }else if(entry->flags == 0x10){
-                printf("Es un directorio \n");   
-        }
+void print_file_type(Fat12Entry *entry){
+    switch(entry->flags) {
+        case 0x01: 
+            printf("Archivo de solo lectura \n");
+            break;
+        case 0x02:
+            printf("Archivo oculto \n");
+            break;
+        case 0x04:
+            printf("Archivo del sistema \n");
+            break;
+        case 0x10:
+            printf("Directorio \n");
     }
+}
 
-void mostrarContenidoArchivo(FILE* in, Fat12Entry* entry, int tamanioEntry, Fat12BootSector* bs)
+void print_file_content(FILE* in, Fat12Entry* entry, int entry_size, Fat12BootSector* bs)
 {
-   unsigned int inicioFat = sizeof(Fat12BootSector) + (bs->sectores_reservados - 1) * bs->sector_size;
-   unsigned int inicioRoot = inicioFat + bs->tamanio_fat * bs->cantidad_tablas_fats * bs->sector_size;
-   unsigned int inicioData = inicioRoot + (bs->root_entries * tamanioEntry); 
+   unsigned int fat_start = sizeof(Fat12BootSector) + (bs->reserved_sectors - 1) * bs->sector_size;
+   unsigned int root_start = fat_start + bs->fat_size * bs->fat_table_count * bs->sector_size;
+   unsigned int data_start = root_start + (bs->root_entries * entry_size); 
 
    unsigned char buffer[bs->sector_size]; 
-   unsigned int tamanioCluster = bs->sectores_por_cluster * bs->sector_size;
-   unsigned int bloque = inicioData + (tamanioCluster * (entry->fat_idx - 2) ); 
-   fseek(in, bloque, SEEK_SET); 
+   unsigned int cluster_size = bs->sectors_by_cluster * bs->sector_size;
+   unsigned int block = data_start + (cluster_size * (entry->fat_idx - 2) ); 
+
+   fseek(in, block, SEEK_SET); 
    fread(buffer, 1, bs->sector_size, in); 
 
-   printf("Bloque [0x%X] :", bloque);
+   printf("Bloque [0x%X] :", block);
    printf("%s \n", buffer);
 
 }
 
-void print_file_info(FILE* in, Fat12Entry *entry, int tamanioEntry, Fat12BootSector *bs, int posicion) {
+void print_file_info(FILE* in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs, int position) {
 
 	switch (entry->filename[0]) {
-	case 0x00:
-		return; // unused entry
-	case 0xE5:
-                printf("\n");
-	        printf("Deleted file: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
-		break;
-	case 0x05:
-                printf("\n");
-		printf("File starting with 0xE5: [%c%.7s.%.3s] ", 0xE5, entry->filename + 1, entry->extension);
-                break;
-	case 0x2E:
-                printf("\n");
-		printf("Directory: [%.8s.%.3s] ", entry->filename, entry->extension);
-		break;
-	default: 
-                printf("\n");
-                printf("File: [%.8s.%.3s] \n", entry->filename, entry->extension);
-                printf("Tamaño de archivo [%i] bytes \n", (int)entry->filesize[0]);
+        case 0x00:
+            return; // unused entry
+        case 0xE5:
+            printf("\n");
+            printf("Archivo eliminado: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
+            break;
+        case 0x05:
+            printf("\n");
+            printf("Archivo comienza con 0xE5: [%c%.7s.%.3s] ", 0xE5, entry->filename + 1, entry->extension);
+            break;
+        case 0x2E:
+            printf("\n");
+            printf("Directorio: [%.8s.%.3s] ", entry->filename, entry->extension);
+            break;
+        default: 
+            printf("\n");
+            printf("File: [%.8s.%.3s] \n", entry->filename, entry->extension);
+            printf("Tamaño de archivo [%i] bytes \n", (int)entry->filesize[0]);
 	}
 
-    tipoDeArchivo(entry);
-    mostrarContenidoArchivo(in, entry, tamanioEntry, bs);
+    print_file_type(entry);
+    print_file_content(in, entry, entry_size, bs);
 }
 
 int main() {
@@ -134,22 +138,26 @@ int main() {
 	fseek(in, 0, SEEK_SET);
 	fread(&bs, sizeof(Fat12BootSector), 1, in);
 
-	printf("En  0x%lx, sector size %d, FAT size %d sectors, %d FATs\n\n",
-		ftell(in), bs.sector_size, bs.tamanio_fat, bs.cantidad_tablas_fats);
+	printf("En  0x%lx, sector size %d, FAT size %d sectors, %d FATs\n\n", ftell(in), bs.sector_size, bs.fat_size, bs.fat_table_count);
 
-	fseek(in, (bs.sectores_reservados - 1 + bs.tamanio_fat * bs.cantidad_tablas_fats) *
-		bs.sector_size, SEEK_CUR);
+	fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
 
 	printf("Root dir_entries %d \n", bs.root_entries);
+
 	for (i = 0; i < bs.root_entries; i++) {
-                //printf("\nAhora en 0x%lX\n", ftell(in));
-		fread(&entry, sizeof(entry), 1, in);
-                unsigned int ultimoSectorLeido = ftell(in);
-		print_file_info(in, &entry, sizeof(entry), &bs, i);
-                fseek(in, ultimoSectorLeido, SEEK_SET);
+
+		fread(&entry, sizeof(entry), 1, in); 
+        
+        unsigned int last_read_sector = ftell(in);
+		
+        print_file_info(in, &entry, sizeof(entry), &bs, i);
+        
+        fseek(in, last_read_sector, SEEK_SET);
 	}
 
 	printf("\nLeido Root directory, ahora en 0x%lX\n", ftell(in));
+
 	fclose(in);
+
 	return 0;
 }
