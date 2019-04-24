@@ -92,7 +92,7 @@ void print_file_type(Fat12Entry *entry)
 void print_file_content(Fat12Entry *entry)
 {
 	unsigned char buffer[bs.sector_size];
-	unsigned int block = get_block_from_current_entry();
+	unsigned int block = get_block_from_current_entry(entry);
 
 	fseek(in, block, SEEK_SET);
 	fread(buffer, 1, bs.sector_size, in);
@@ -141,9 +141,9 @@ void print_tree(int deep)
 /**
  * Devolver el bloque el cual tiene el contenido del entry actual
  */
-int get_block_from_current_entry()
+int get_block_from_current_entry(Fat12Entry *entry)
 {
-	return data_start + (cluster_size * (entry.fat_idx - 2));
+	return data_start + (cluster_size * (entry->fat_idx - 2));
 }
 
 /**
@@ -191,7 +191,7 @@ void traverseFat(int offset, int deep, int is_root)
 
 				// Incrementar contador de subdirectorios y recorrer el próximo
 				deep++;
-				traverseFat(get_block_from_current_entry(), deep, 0);
+				traverseFat(get_block_from_current_entry(&entry), deep, 0);
 				deep--;
 
 				// Una vez terminado de leer el subdirectorio, leer el próximo entry
