@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct
 {
@@ -41,18 +42,28 @@ typedef struct
 {
 	unsigned char filename[8];
 	unsigned char extension[3];
-	unsigned char flags;
-	unsigned char reserved;
-	unsigned char created_time;
-	unsigned char created_hour[2];
-	unsigned char created_day[2];
-	unsigned char accessed_day[2];
-	unsigned char high_bytes_first_cluster_address[2];
-	unsigned char writen_time[2];
-	unsigned char writen_day[2];
+	char flags;
+	char reserved;
+	char create_time_tenths_seconds;
+	unsigned short create_time;
+	unsigned short create_day;
+	unsigned short last_access_date;
+	unsigned short ignore_in_fat12;
+	unsigned short last_write_time;
+	unsigned short last_write_date;
 	unsigned short fat_idx;
 	unsigned char filesize[4];
 } __attribute((packed)) Fat12Entry;
+
+unsigned int fat_start;
+unsigned int root_start;
+unsigned int data_start;
+unsigned int cluster_size;
+Fat12BootSector bs;
+FILE *in;
+Fat12Entry entry;
+int stack[100]; // Máxima cantidad de subdirectorios -> TODO: aumentar de forma dinámica este valor
+int tree;		// Flag para ingreso del usuario
 
 /**
  * Printear flag del archivo
@@ -78,18 +89,13 @@ void print_file_type(Fat12Entry *entry)
 /**
  * Printear contenido del archivo 
  */
-void print_file_content(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs)
+void print_file_content(Fat12Entry *entry)
 {
-	unsigned int fat_start = sizeof(Fat12BootSector) + (bs->reserved_sectors - 1) * bs->sector_size;
-	unsigned int root_start = fat_start + bs->fat_size * bs->fat_table_count * bs->sector_size;
-	unsigned int data_start = root_start + (bs->root_entries * entry_size);
-
-	unsigned char buffer[bs->sector_size];
-	unsigned int cluster_size = bs->sectors_by_cluster * bs->sector_size;
-	unsigned int block = data_start + (cluster_size * (entry->fat_idx - 2));
+	unsigned char buffer[bs.sector_size];
+	unsigned int block = get_block_from_current_entry();
 
 	fseek(in, block, SEEK_SET);
-	fread(buffer, 1, bs->sector_size, in);
+	fread(buffer, 1, bs.sector_size, in);
 
 	printf("Bloque [0x%X] :", block);
 	printf("%s \n", buffer);
@@ -98,13 +104,10 @@ void print_file_content(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSe
 /**
  * Printear información sobre el archivo
  */
-void print_file_info(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSector *bs)
+void print_file_info(Fat12Entry *entry)
 {
-
 	switch (entry->filename[0])
 	{
-	case 0x00:
-		return; // Entrada sin utilizar
 	case 0xE5:
 		printf("\n");
 		printf("Archivo eliminado: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
@@ -122,22 +125,120 @@ void print_file_info(FILE *in, Fat12Entry *entry, int entry_size, Fat12BootSecto
 		printf("File: [%.8s.%.3s] \n", entry->filename, entry->extension);
 		printf("Tamaño de archivo [%i] bytes \n", (int)entry->filesize[0]);
 	}
+}
 
-	print_file_type(entry);
-	print_file_content(in, entry, entry_size, bs);
+/**
+ * Printear estructura jerárquica
+ */
+void print_tree(int deep)
+{
+	for (int i = 0; i < deep; i++)
+	{
+		printf("%s", "│ ");
+	}
+}
+
+/**
+ * Devolver el bloque el cual tiene el contenido del entry actual
+ */
+int get_block_from_current_entry()
+{
+	return data_start + (cluster_size * (entry.fat_idx - 2));
+}
+
+/**
+ * Recorrer recursivamente la estructura del root
+ */
+void traverseFat(int offset, int deep, int is_root)
+{
+	if (is_root == 1)
+	{
+		// Ir al comienzo del directorio root
+		fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
+	}
+	else
+	{
+		// Ir al offset seleccionado
+		fseek(in, offset, SEEK_SET);
+	}
+
+	// Leer entry
+	fread(&entry, sizeof(entry), 1, in);
+
+	// Leer hasta que nos encontremos con un entry vacío
+	while (entry.filename[0] != 0x00)
+	{
+		// Verificar si el entry es un directorio o un archivo
+		if (entry.flags == 0x10)
+		{
+			// Saltear el entry si es del tipo dot y leer el próximo
+			if (strncmp(&entry.filename[0], ".", 1) != 0)
+			{
+				// Validar que tipo de información printear según el ingreso del usuario
+				switch (tree)
+				{
+				case 0:
+					print_tree(deep);
+					printf("├─%s\n", entry.filename);
+					break;
+				case 1:
+					print_file_info(&entry);
+					print_file_type(&entry);
+				}
+
+				// Guardar el offset actual en el stack
+				stack[deep] = ftell(in);
+
+				// Incrementar contador de subdirectorios y recorrer el próximo
+				deep++;
+				traverseFat(get_block_from_current_entry(), deep, 0);
+				deep--;
+
+				// Una vez terminado de leer el subdirectorio, leer el próximo entry
+				fseek(in, stack[deep], SEEK_SET);
+				fread(&entry, sizeof(entry), 1, in);
+			}
+			else
+			{
+				fseek(in, ftell(in), SEEK_SET);
+				fread(&entry, sizeof(entry), 1, in);
+			}
+		}
+		else
+		{
+			// Guardar el offset actual
+			int current_offset = ftell(in);
+
+			// Validar que tipo de información printear según el ingreso del usuario
+			switch (tree)
+			{
+			case 0:
+				print_tree(deep);
+				printf("├─%s\n", entry.filename);
+				break;
+			case 1:
+				print_file_info(&entry);
+				print_file_type(&entry);
+				print_file_content(&entry);
+			}
+
+			fseek(in, current_offset, SEEK_SET);
+			fread(&entry, sizeof(entry), 1, in);
+		}
+	}
 }
 
 int main()
 {
-	FILE *in = fopen("test.img", "rb");
+	int deep = 0;
 	int i;
 	PartitionTable pt[4];
-	Fat12BootSector bs;
-	Fat12Entry entry;
+
+	// Abrir FS
+	in = fopen("test.img", "rb");
 
 	// Ir al inicio de la tabla de particiones
 	fseek(in, 0x1BE, SEEK_SET);
-	// Leo entradas
 	fread(pt, sizeof(PartitionTable), 4, in);
 
 	for (i = 0; i < 4; i++)
@@ -162,22 +263,31 @@ int main()
 
 	printf("En  0x%lx, sector size %d, FAT size %d sectors, %d FATs\n\n", ftell(in), bs.sector_size, bs.fat_size, bs.fat_table_count);
 
-	// Ir al root directory
-	fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
+	// Calcular datos
+	fat_start = sizeof(Fat12BootSector) + (bs.reserved_sectors - 1) * bs.sector_size;
+	root_start = fat_start + bs.fat_size * bs.fat_table_count * bs.sector_size;
+	data_start = root_start + (bs.root_entries * sizeof(entry));
+	cluster_size = bs.sectors_by_cluster * bs.sector_size;
 
 	printf("Root dir_entries %d \n", bs.root_entries);
 
-	// Leer root
-	for (i = 0; i < bs.root_entries; i++)
+	// Leer ingreso del usuario y mostrar arbol o detalles
+	char *p, s[3];
+	printf("Ingrese 0 para mostrar árbol o 1 para mostrar detalles: ");
+
+	while (fgets(s, sizeof(s), stdin))
 	{
-		fread(&entry, sizeof(entry), 1, in);
-
-		unsigned int last_read_sector = ftell(in);
-
-		print_file_info(in, &entry, sizeof(entry), &bs);
-
-		fseek(in, last_read_sector, SEEK_SET);
+		tree = strtol(s, &p, 2);
+		if (p == s || *p != '\n')
+		{
+			printf("Ingrese 0 para mostrar árbol o 1 para mostrar detalles: ");
+		}
+		else
+			break;
 	}
+
+	// Ir al root directory
+	traverseFat(0, deep, 1);
 
 	printf("\nLeido Root directory, ahora en 0x%lX\n", ftell(in));
 
