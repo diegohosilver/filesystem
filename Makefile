@@ -7,6 +7,7 @@ clean:
 	rm -f $(BIN) $(OBJ)
 
 all: 
+	gcc find_file.c -o find_file
 	gcc read_boot.c -o read_boot
-	gcc read_mbr.c -o  read_mbr
+	gcc read_mbr.c -o read_mbr
 	gcc read_root.c -o read_root
