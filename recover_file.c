@@ -1,3 +1,6 @@
+#include <stdio.h>
+#include <stdlib.h>
+
 typedef struct
 {
 	unsigned char first_byte;
@@ -55,7 +58,7 @@ int main(int argc, char *argv[]) {
 
 	int i;
 	// Abrir FS
-	in = fopen("test.img", "rb");
+	FILE *in = fopen("test.img", "rb");
 
 	Fat12BootSector bs;
 	Fat12Entry entry;
@@ -89,14 +92,26 @@ int main(int argc, char *argv[]) {
 
 	printf("Root dir_entries %d \n", bs.root_entries);
 
+	i = 0;
 	for (i = 0; i < bs.root_entries; i++) {
-
 		fread(&entry, sizeof(entry), 1, in);
-        unsigned int ultimoSectorLeido = ftell(in);
-		if(&entry->filename[0] == "0xE5"){ // "0xE5" -> "0x05"
-			
+		int ultimoSectorLeido = ftell(in);
+		
+		if(entry.filename[0] == 0xE5)
+		{
+			printf("\nEl archivo está eliminado.\n");
+			entry.filename[0] = archivo[0];
+			printf("El archivo se ha recuperado.\n");
 		}
-        fseek(in, ultimoSectorLeido, SEEK_SET);
+		
+		if(entry.flags == 0x10 && entry.filename[0] != 0x2E)
+		{
+			unsigned int inicioDataDirectorio = (0x4A00 + (bs.sectors_by_cluster * bs.sector_size * (entry.fat_idx - 2)));
+			printf("\ninicioDataDirectorio 0x%lX\n", inicioDataDirectorio);
+			fseek(in, inicioDataDirectorio, SEEK_SET);
+			leerDirectorio(in, entry, ftell(in), bs.sectors_by_cluster, bs);
+		}
+		fseek(in, ultimoSectorLeido, SEEK_SET);
 	}
 
     printf("\n");
