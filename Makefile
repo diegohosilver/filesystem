@@ -1,6 +1,6 @@
 .PHONY: all clean
 
-SRC = read_boot.c read_mbr.c read_root.c 
+SRC = read_boot.c read_mbr.c read_root.c find_file.c
 BIN = $(SRC:.c=)
 
 clean:
