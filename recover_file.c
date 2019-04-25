@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct
 {
@@ -54,29 +55,189 @@ typedef struct
 	unsigned char filesize[4];
 } __attribute((packed)) Fat12Entry;
 
-int main(int argc, char *argv[]) {
+unsigned int fat_start;
+unsigned int root_start;
+unsigned int data_start;
+unsigned int cluster_size;
+Fat12BootSector bs;
+FILE *in;
+Fat12Entry entry;
+int stack[100]; // Máxima cantidad de subdirectorios -> TODO: aumentar de forma dinámica este valor
+int tree;		// Flag para ingreso del usuario
 
+/**
+ * Printear flag del archivo
+ */
+void print_file_type(Fat12Entry *entry)
+{
+	switch (entry->flags)
+	{
+	case 0x01:
+		printf("Flag: Archivo de solo lectura \n");
+		break;
+	case 0x02:
+		printf("Flag: Archivo oculto \n");
+		break;
+	case 0x04:
+		printf("Flag: Archivo del sistema \n");
+		break;
+	case 0x10:
+		printf("Flag: Directorio \n");
+	}
+}
+
+/**
+ * Printear contenido del archivo 
+ */
+void print_file_content(Fat12Entry *entry)
+{
+	unsigned char buffer[bs.sector_size];
+	unsigned int block = get_block_from_current_entry(entry);
+
+	fseek(in, block, SEEK_SET);
+	fread(buffer, 1, bs.sector_size, in);
+
+	printf("Bloque [0x%X] :", block);
+	printf("%s \n", buffer);
+}
+
+/**
+ * Printear información sobre el archivo
+ */
+void print_file_info(Fat12Entry *entry)
+{
+	switch (entry->filename[0])
+	{
+	case 0xE5:
+		printf("\n");
+		printf("Archivo eliminado: [?%.7s.%.3s] ", entry->filename + 1, entry->extension);
+		break;
+	case 0x05:
+		printf("\n");
+		printf("Archivo comienza con 0xE5: [%c%.7s.%.3s] ", 0xE5, entry->filename + 1, entry->extension);
+		break;
+	case 0x2E:
+		printf("\n");
+		printf("Directorio: [%.8s.%.3s] ", entry->filename, entry->extension);
+		break;
+	default:
+		printf("\n");
+		printf("File: [%.8s.%.3s] \n", entry->filename, entry->extension);
+		printf("Tamaño de archivo [%i] bytes \n", (int)entry->filesize[0]);
+	}
+}
+
+/**
+ * Printear estructura jerárquica
+ */
+void print_tree(int deep)
+{
+	for (int i = 0; i < deep; i++)
+	{
+		printf("%s", "│ ");
+	}
+}
+
+/**
+ * Devolver el bloque el cual tiene el contenido del entry actual
+ */
+int get_block_from_current_entry(Fat12Entry *entry)
+{
+	return data_start + (cluster_size * (entry->fat_idx - 2));
+}
+
+/**
+ * Recorrer recursivamente la estructura del root
+ */
+void traverseFat(int offset, int deep, int is_root)
+{
+	if (is_root == 1)
+	{
+		// Ir al comienzo del directorio root
+		fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
+	}
+	else
+	{
+		// Ir al offset seleccionado
+		fseek(in, offset, SEEK_SET);
+	}
+
+	// Leer entry
+	fread(&entry, sizeof(entry), 1, in);
+
+	// Leer hasta que nos encontremos con un entry vacío
+	while (entry.filename[0] != 0x00)
+	{
+		// Verificar si el entry es un directorio o un archivo
+		if (entry.flags == 0x10)
+		{
+			// Saltear el entry si es del tipo dot y leer el próximo
+			if (strncmp(&entry.filename[0], ".", 1) != 0)
+			{
+				// Guardar el offset actual en el stack
+				stack[deep] = ftell(in);
+
+				// Incrementar contador de subdirectorios y recorrer el próximo
+				deep++;
+				traverseFat(get_block_from_current_entry(&entry), deep, 0);
+				deep--;
+
+				// Una vez terminado de leer el subdirectorio, leer el próximo entry
+				fseek(in, stack[deep], SEEK_SET);
+				fread(&entry, sizeof(entry), 1, in);
+			}
+			else
+			{
+				fseek(in, ftell(in), SEEK_SET);
+				fread(&entry, sizeof(entry), 1, in);
+			}
+		}
+		else
+		{
+			// Guardar el offset actual
+			int current_offset = ftell(in);
+
+			fseek(in, current_offset, SEEK_SET);
+			fread(&entry, sizeof(entry), 1, in);
+
+			// Validar que tipo de información printear según el ingreso del usuario
+			if (entry.filename[0] == 0xE5)
+			{
+				printf("Archivo eliminado \n");
+				fseek(in, current_offset, SEEK_SET);
+				entry.filename[0] = "R";
+				fwrite(&entry, sizeof(entry), 1, in);
+				printf("Archivo recuperado \n");
+			}
+		}
+	}
+}
+
+int main()
+{
+	int deep = 0;
 	int i;
-	// Abrir FS
-	FILE *in = fopen("test.img", "rb");
-
-	Fat12BootSector bs;
-	Fat12Entry entry;
 	PartitionTable pt[4];
-	char archivo[] = argv[2]; 
+
+	// Abrir FS
+	in = fopen("test.img", "wb");
 
 	// Ir al inicio de la tabla de particiones
 	fseek(in, 0x1BE, SEEK_SET);
 	fread(pt, sizeof(PartitionTable), 4, in);
 
-	for (i = 0; i < 4; i++) {
-		if (pt[i].partition_type == 1) {
+	for (i = 0; i < 4; i++)
+	{
+		if (pt[i].partition_type == 1)
+		{
 			printf("Encontrada particion FAT12 %d\n", i);
 			break;
 		}
 	}
 
-	if (i == 4) {
+	// Terminar ejecución si no existe fat12
+	if (i == 4)
+	{
 		printf("No encontrado filesystem FAT12, saliendo...\n");
 		return -1;
 	}
@@ -85,37 +246,37 @@ int main(int argc, char *argv[]) {
 	fseek(in, 0, SEEK_SET);
 	fread(&bs, sizeof(Fat12BootSector), 1, in);
 
-    // Ir al comienzo del directorio root
-	fseek(in, (bs.reserved_sectors - 1 + bs.fat_size * bs.fat_table_count) * bs.sector_size, SEEK_CUR);
-	
-    printf("\nInit Root directory en 0x%lX\n", ftell(in));
+	printf("En  0x%lx, sector size %d, FAT size %d sectors, %d FATs\n\n", ftell(in), bs.sector_size, bs.fat_size, bs.fat_table_count);
+
+	// Calcular datos
+	fat_start = sizeof(Fat12BootSector) + (bs.reserved_sectors - 1) * bs.sector_size;
+	root_start = fat_start + bs.fat_size * bs.fat_table_count * bs.sector_size;
+	data_start = root_start + (bs.root_entries * sizeof(entry));
+	cluster_size = bs.sectors_by_cluster * bs.sector_size;
 
 	printf("Root dir_entries %d \n", bs.root_entries);
 
-	i = 0;
-	for (i = 0; i < bs.root_entries; i++) {
-		fread(&entry, sizeof(entry), 1, in);
-		int ultimoSectorLeido = ftell(in);
-		
-		if(entry.filename[0] == 0xE5)
+	// Leer ingreso del usuario y mostrar arbol o detalles
+	char *p, s[3];
+	printf("Ingrese 0 para mostrar árbol o 1 para mostrar detalles: ");
+
+	while (fgets(s, sizeof(s), stdin))
+	{
+		tree = strtol(s, &p, 2);
+		if (p == s || *p != '\n')
 		{
-			printf("\nEl archivo está eliminado.\n");
-			entry.filename[0] = archivo[0];
-			printf("El archivo se ha recuperado.\n");
+			printf("Ingrese 0 para mostrar árbol o 1 para mostrar detalles: ");
 		}
-		
-		if(entry.flags == 0x10 && entry.filename[0] != 0x2E)
-		{
-			unsigned int inicioDataDirectorio = (0x4A00 + (bs.sectors_by_cluster * bs.sector_size * (entry.fat_idx - 2)));
-			printf("\ninicioDataDirectorio 0x%lX\n", inicioDataDirectorio);
-			fseek(in, inicioDataDirectorio, SEEK_SET);
-			leerDirectorio(in, entry, ftell(in), bs.sectors_by_cluster, bs);
-		}
-		fseek(in, ultimoSectorLeido, SEEK_SET);
+		else
+			break;
 	}
 
-    printf("\n");
+	// Ir al root directory
+	traverseFat(0, deep, 1);
+
 	printf("\nLeido Root directory, ahora en 0x%lX\n", ftell(in));
+
 	fclose(in);
+
 	return 0;
 }
